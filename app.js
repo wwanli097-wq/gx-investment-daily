@@ -53,6 +53,7 @@ async function readJson(path){
 }
 
 async function start(){
+  render();
   try { report = await readJson('reports/latest.json'); } catch (_) {}
   try {
     const loadedHistory = await readJson('reports/history.json');
