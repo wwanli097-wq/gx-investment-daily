@@ -28,7 +28,11 @@ function policyBlock(policy){
 
 function fullReport(data){
   const titles = data.policies.slice(0, 3).map(item => item.title).join('、');
-  return `<a class="back-link" href="index.html">← 返回最新日报</a><div class="report-intro"><p class="eyebrow">DAILY POLICY INTELLIGENCE</p><h1>GX Investment 全球政策与投资影响日报</h1><p class="report-date">${data.label}</p><p class="intro-note"><strong>说明：</strong>${data.note}</p></div><div class="report-summary"><h2>今日摘要</h2><p>本期重点关注${titles}等政策变化，按政策事实与分析判断分开呈现，并标明确定性、影响路径及需要继续核实的边界。</p></div><div class="policy-list">${data.policies.map(policyBlock).join('')}</div><section class="report-section closing-section"><div class="report-content"><h2>对 GX 业务的影响排序</h2><ol><li><strong>高度相关：</strong>直接影响产品结构、客户覆盖或能源项目执行条件的政策。</li><li><strong>中度相关：</strong>通过资金价格、流动性或市场预期传导的政策。</li><li><strong>观察事项：</strong>需要等后续执行数据确认方向的政策。</li></ol><h2>风险与待核实事项</h2><p>拟议规则、征求意见稿和单次流动性操作都不等同于最终政策效果；实际影响还要通过价格、融资、项目执行和市场流动性验证。</p><h2>下一步观察</h2><p>继续跟踪各项政策的最终文本、执行数据、市场定价和对项目现金流的实际影响。</p></div></section>`;
+  const summary = data.summary || `本期重点关注${titles}等政策变化，按政策事实与分析判断分开呈现，并标明确定性、影响路径及需要继续核实的边界。`;
+  const ranking = data.businessRanking || ['高度相关：直接影响能源市场、项目现金流或电力基础设施执行条件的政策。','中度相关：通过利率、融资成本、流动性和市场预期传导的政策。','观察事项：需要等待后续执行数据确认方向的政策。'];
+  const risks = data.riskNotes || ['政策发布不等于投资收益；市场影响还取决于执行、供需、价格和融资条件。'];
+  const calendar = data.calendar || ['继续跟踪政策最终文本、执行数据和市场定价。'];
+  return `<a class="back-link" href="index.html">← 返回最新日报</a><div class="report-intro"><p class="eyebrow">DAILY POLICY INTELLIGENCE</p><h1>GX Investment 全球政策与投资影响日报</h1><p class="report-date">${data.label}</p><p class="intro-note"><strong>说明：</strong>${data.note}</p></div><div class="report-summary"><h2>今日摘要</h2><p>${summary}</p></div><h2>今日最相关的5条全球政策</h2><div class="policy-list">${data.policies.map(policyBlock).join('')}</div><section class="report-section closing-section"><div class="report-content"><h2>对 GX 业务的影响排序</h2><ol>${ranking.map(item => `<li>${item}</li>`).join('')}</ol><h2>风险与待核实事项</h2><ul>${risks.map(item => `<li>${item}</li>`).join('')}</ul><h2>政策日程</h2><ul>${calendar.map(item => `<li>${item}</li>`).join('')}</ul></div></section>`;
 }
 
 function render(detailReport = report){
