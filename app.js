@@ -47,18 +47,20 @@ function render(detailReport = report){
 }
 
 async function readJson(path){
-  const response = await fetch(path, {cache:'no-store'});
+  const url = new URL(path, document.baseURI);
+  url.searchParams.set('v', report.date || Date.now().toString());
+  const response = await fetch(url.href, {cache:'no-store'});
   if(!response.ok) throw new Error(`${path} unavailable`);
   return response.json();
 }
 
 async function start(){
   render();
-  try { report = await readJson('reports/latest.json'); } catch (_) {}
+  try { report = await readJson('reports/latest.json'); } catch (error) { console.warn('日报数据加载失败，使用备用内容', error); }
   try {
     const loadedHistory = await readJson('reports/history.json');
     if(Array.isArray(loadedHistory) && loadedHistory.length) history = loadedHistory;
-  } catch (_) {}
+  } catch (error) { console.warn('历史索引加载失败', error); }
   render();
 
   const detailNode = document.querySelector('#detail');
