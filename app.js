@@ -48,7 +48,8 @@ function render(detailReport = report){
 
 async function readJson(path){
   const url = new URL(path, document.baseURI);
-  url.searchParams.set('v', report.date || Date.now().toString());
+  // Use a per-request cache key so Pages never serves the fallback day's JSON.
+  url.searchParams.set('v', Date.now().toString());
   const response = await fetch(url.href, {cache:'no-store'});
   if(!response.ok) throw new Error(`${path} unavailable`);
   return response.json();
