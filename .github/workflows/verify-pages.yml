@@ -1,0 +1,122 @@
+name: Verify published GX Investment report
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "reports/**"
+      - "app.js"
+      - ".github/workflows/verify-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gx-pages-verification-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout published source
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate source files
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check app.js
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const latest = JSON.parse(fs.readFileSync('reports/latest.json', 'utf8'));
+          const history = JSON.parse(fs.readFileSync('reports/history.json', 'utf8'));
+          const required = ['rank','title','agency','date','status','direction','source','url','facts','analysis','impact','risk'];
+          if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(latest.date)) throw new Error('Invalid latest.date');
+          if (typeof latest.label !== 'string' || typeof latest.note !== 'string' || typeof latest.summary !== 'string') throw new Error('Missing latest text fields');
+          for (const key of ['policies','businessRanking','riskNotes','calendar']) if (!Array.isArray(latest[key])) throw new Error('Invalid ' + key);
+          if (latest.policies.length < 5) throw new Error('Fewer than five policies');
+          for (const p of latest.policies) for (const key of required) if (typeof p[key] !== 'string' || !p[key].trim()) throw new Error('Missing ' + key + ' in policy ' + p.rank);
+          const daily = JSON.parse(fs.readFileSync(path.join('reports', latest.date + '.json'), 'utf8'));
+          if (JSON.stringify(latest) !== JSON.stringify(daily)) throw new Error('latest and daily archive differ');
+          if (history.length !== 5) throw new Error('history must contain exactly five dates');
+          const expected = Array.from({length:5}, (_,i) => new Date(Date.parse(latest.date + 'T00:00:00Z') - i*86400000).toISOString().slice(0,10));
+          if (JSON.stringify(history.map(x => x.date)) !== JSON.stringify(expected)) throw new Error('history dates are not the latest five consecutive days');
+          for (const item of history) {
+            const archive = JSON.parse(fs.readFileSync(path.join('reports', item.date + '.json'), 'utf8'));
+            if (archive.date !== item.date || archive.policies.length < 5 || archive.label !== item.label) throw new Error('Archive mismatch: ' + item.date);
+          }
+          const files = fs.readdirSync('reports').filter(x => /^\\d{4}-\\d{2}-\\d{2}\\.json$/.test(x)).sort();
+          const wanted = expected.slice().sort().map(x => x + '.json');
+          if (JSON.stringify(files) !== JSON.stringify(wanted)) throw new Error('Old or unexpected report archives remain');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, 'report_date=' + latest.date + '\\n');
+          console.log('Source validation passed for ' + latest.date + ' (' + latest.policies.length + ' policies)');
+          NODE
+
+      - name: Verify the live GitHub Pages site over HTTPS
+        env:
+          SITE_URL: https://wwanli097-wq.github.io/gx-investment-daily
+          EXPECTED_DATE: ${{ steps.source.outputs.report_date }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const base = process.env.SITE_URL.replace(/\\/$/, '');
+          const expectedDate = process.env.EXPECTED_DATE;
+          const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+          async function get(path, retries = 30) {
+            let last = '';
+            for (let i = 1; i <= retries; i++) {
+              try {
+                const url = base + path + (path.includes('?') ? '&' : '?') + 'verify=' + Date.now();
+                const response = await fetch(url, {cache:'no-store', redirect:'follow'});
+                if (response.ok) return {status:response.status, text:await response.text(), url:response.url};
+                last = 'HTTP ' + response.status;
+              } catch (e) { last = String(e); }
+              if (i < retries) await wait(10000);
+            }
+            throw new Error(path + ' unavailable after retries: ' + last);
+          }
+          const home = await get('/');
+          if (!home.text.includes('GX Investment')) throw new Error('Homepage content does not identify GX Investment');
+          const latestResponse = await get('/reports/latest.json');
+          const latest = JSON.parse(latestResponse.text);
+          if (latest.date !== expectedDate) throw new Error('Live latest date ' + latest.date + ' != expected ' + expectedDate);
+          if (!Array.isArray(latest.policies) || latest.policies.length < 5) throw new Error('Live latest has fewer than five policies');
+          const archiveResponse = await get('/reports/' + expectedDate + '.json');
+          const archive = JSON.parse(archiveResponse.text);
+          if (JSON.stringify(latest) !== JSON.stringify(archive)) throw new Error('Live latest and daily archive differ');
+          const historyResponse = await get('/reports/history.json');
+          const history = JSON.parse(historyResponse.text);
+          if (history.length !== 5) throw new Error('Live history does not contain exactly five dates');
+          const expectedDates = Array.from({length:5}, (_,i) => new Date(Date.parse(expectedDate + 'T00:00:00Z') - i*86400000).toISOString().slice(0,10));
+          if (JSON.stringify(history.map(x => x.date)) !== JSON.stringify(expectedDates)) throw new Error('Live history dates mismatch');
+          const checked = [];
+          for (const item of history) {
+            const response = await get('/reports/' + item.date + '.json');
+            const data = JSON.parse(response.text);
+            if (data.date !== item.date || data.label !== item.label || data.policies.length < 5) throw new Error('Live archive mismatch: ' + item.date);
+            checked.push({date:item.date,status:response.status,policies:data.policies.length});
+          }
+          const summary = [
+            '## GitHub Pages verification passed',
+            '',
+            '- Homepage: HTTP ' + home.status,
+            '- latest.json: HTTP ' + latestResponse.status + ', date ' + latest.date + ', ' + latest.policies.length + ' policies',
+            '- Daily archive: HTTP ' + archiveResponse.status + ', exact match with latest.json',
+            '- history.json: HTTP ' + historyResponse.status + ', five dates in descending order',
+            '- Recent archives:',
+            ...checked.map(x => '  - ' + x.date + ': HTTP ' + x.status + ', ' + x.policies + ' policies')
+          ].join('\\n');
+          require('fs').appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary + '\\n');
+          console.log(summary);
+          NODE
