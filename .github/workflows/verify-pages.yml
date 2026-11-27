@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: gx-pages-verification-${{ github.ref }}
+  group: gx-pages-verification-\${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -65,7 +65,7 @@ jobs:
       - name: Verify the live GitHub Pages site over HTTPS
         env:
           SITE_URL: https://wwanli097-wq.github.io/gx-investment-daily
-          EXPECTED_DATE: ${{ steps.source.outputs.report_date }}
+          EXPECTED_DATE: \${{ steps.source.outputs.report_date }}
         shell: bash
         run: |
           set -euo pipefail
