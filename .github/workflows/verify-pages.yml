@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: gx-pages-verification-\${{ github.ref }}
+  group: gx-pages-verification-main
   cancel-in-progress: false
 
 jobs:
@@ -41,7 +41,7 @@ jobs:
           const latest = JSON.parse(fs.readFileSync('reports/latest.json', 'utf8'));
           const history = JSON.parse(fs.readFileSync('reports/history.json', 'utf8'));
           const required = ['rank','title','agency','date','status','direction','source','url','facts','analysis','impact','risk'];
-          if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(latest.date)) throw new Error('Invalid latest.date');
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(latest.date)) throw new Error('Invalid latest.date');
           if (typeof latest.label !== 'string' || typeof latest.note !== 'string' || typeof latest.summary !== 'string') throw new Error('Missing latest text fields');
           for (const key of ['policies','businessRanking','riskNotes','calendar']) if (!Array.isArray(latest[key])) throw new Error('Invalid ' + key);
           if (latest.policies.length < 5) throw new Error('Fewer than five policies');
@@ -55,22 +55,21 @@ jobs:
             const archive = JSON.parse(fs.readFileSync(path.join('reports', item.date + '.json'), 'utf8'));
             if (archive.date !== item.date || archive.policies.length < 5 || archive.label !== item.label) throw new Error('Archive mismatch: ' + item.date);
           }
-          const files = fs.readdirSync('reports').filter(x => /^\\d{4}-\\d{2}-\\d{2}\\.json$/.test(x)).sort();
+          const files = fs.readdirSync('reports').filter(x => /^\d{4}-\d{2}-\d{2}\.json$/.test(x)).sort();
           const wanted = expected.slice().sort().map(x => x + '.json');
           if (JSON.stringify(files) !== JSON.stringify(wanted)) throw new Error('Old or unexpected report archives remain');
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, 'report_date=' + latest.date + '\\n');
           console.log('Source validation passed for ' + latest.date + ' (' + latest.policies.length + ' policies)');
           NODE
+          echo "EXPECTED_DATE=$(node -p "require('./reports/latest.json').date")" >> "$GITHUB_ENV"
 
       - name: Verify the live GitHub Pages site over HTTPS
         env:
           SITE_URL: https://wwanli097-wq.github.io/gx-investment-daily
-          EXPECTED_DATE: \${{ steps.source.outputs.report_date }}
         shell: bash
         run: |
           set -euo pipefail
           node <<'NODE'
-          const base = process.env.SITE_URL.replace(/\\/$/, '');
+          const base = process.env.SITE_URL.replace(/\/$/, '');
           const expectedDate = process.env.EXPECTED_DATE;
           const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
           async function get(path, retries = 30) {
@@ -116,7 +115,7 @@ jobs:
             '- history.json: HTTP ' + historyResponse.status + ', five dates in descending order',
             '- Recent archives:',
             ...checked.map(x => '  - ' + x.date + ': HTTP ' + x.status + ', ' + x.policies + ' policies')
-          ].join('\\n');
-          require('fs').appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary + '\\n');
+          ].join('\n');
+          require('fs').appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary + '\n');
           console.log(summary);
           NODE
