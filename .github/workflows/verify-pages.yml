@@ -73,50 +73,60 @@ jobs:
           const base = process.env.SITE_URL.replace(/\/$/, '');
           const expectedDate = process.env.EXPECTED_DATE;
           const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
-          async function get(path, retries = 30) {
-            let last = '';
-            for (let i = 1; i <= retries; i++) {
-              try {
-                const url = base + path + (path.includes('?') ? '&' : '?') + 'verify=' + Date.now();
-                const response = await fetch(url, {cache:'no-store', redirect:'follow'});
-                if (response.ok) return {status:response.status, text:await response.text(), url:response.url};
-                last = 'HTTP ' + response.status;
-              } catch (e) { last = String(e); }
-              if (i < retries) await wait(10000);
+          async function get(path) {
+            const url = base + path + (path.includes('?') ? '&' : '?') + 'verify=' + Date.now();
+            const response = await fetch(url, {cache:'no-store', redirect:'follow'});
+            if (!response.ok) throw new Error(path + ' HTTP ' + response.status);
+            return {status:response.status, text:await response.text(), url:response.url};
+          }
+          async function verifyOnce() {
+            const home = await get('/');
+            if (!home.text.includes('GX Investment')) throw new Error('Homepage content does not identify GX Investment');
+            const latestResponse = await get('/reports/latest.json');
+            const latest = JSON.parse(latestResponse.text);
+            if (latest.date !== expectedDate) throw new Error('Live latest date ' + latest.date + ' != expected ' + expectedDate);
+            if (!Array.isArray(latest.policies) || latest.policies.length < 5) throw new Error('Live latest has fewer than five policies');
+            const archiveResponse = await get('/reports/' + expectedDate + '.json');
+            const archive = JSON.parse(archiveResponse.text);
+            if (JSON.stringify(latest) !== JSON.stringify(archive)) throw new Error('Live latest and daily archive differ');
+            const historyResponse = await get('/reports/history.json');
+            const history = JSON.parse(historyResponse.text);
+            if (history.length !== 5) throw new Error('Live history does not contain exactly five dates');
+            const expectedDates = Array.from({length:5}, (_,i) => new Date(Date.parse(expectedDate + 'T00:00:00Z') - i*86400000).toISOString().slice(0,10));
+            if (JSON.stringify(history.map(x => x.date)) !== JSON.stringify(expectedDates)) throw new Error('Live history dates mismatch');
+            const checked = [];
+            for (const item of history) {
+              const response = await get('/reports/' + item.date + '.json');
+              const data = JSON.parse(response.text);
+              if (data.date !== item.date || data.label !== item.label || data.policies.length < 5) throw new Error('Live archive mismatch: ' + item.date);
+              checked.push({date:item.date,status:response.status,policies:data.policies.length});
             }
-            throw new Error(path + ' unavailable after retries: ' + last);
+            return {home,latestResponse,archiveResponse,historyResponse,latest,checked};
           }
-          const home = await get('/');
-          if (!home.text.includes('GX Investment')) throw new Error('Homepage content does not identify GX Investment');
-          const latestResponse = await get('/reports/latest.json');
-          const latest = JSON.parse(latestResponse.text);
-          if (latest.date !== expectedDate) throw new Error('Live latest date ' + latest.date + ' != expected ' + expectedDate);
-          if (!Array.isArray(latest.policies) || latest.policies.length < 5) throw new Error('Live latest has fewer than five policies');
-          const archiveResponse = await get('/reports/' + expectedDate + '.json');
-          const archive = JSON.parse(archiveResponse.text);
-          if (JSON.stringify(latest) !== JSON.stringify(archive)) throw new Error('Live latest and daily archive differ');
-          const historyResponse = await get('/reports/history.json');
-          const history = JSON.parse(historyResponse.text);
-          if (history.length !== 5) throw new Error('Live history does not contain exactly five dates');
-          const expectedDates = Array.from({length:5}, (_,i) => new Date(Date.parse(expectedDate + 'T00:00:00Z') - i*86400000).toISOString().slice(0,10));
-          if (JSON.stringify(history.map(x => x.date)) !== JSON.stringify(expectedDates)) throw new Error('Live history dates mismatch');
-          const checked = [];
-          for (const item of history) {
-            const response = await get('/reports/' + item.date + '.json');
-            const data = JSON.parse(response.text);
-            if (data.date !== item.date || data.label !== item.label || data.policies.length < 5) throw new Error('Live archive mismatch: ' + item.date);
-            checked.push({date:item.date,status:response.status,policies:data.policies.length});
+          let result;
+          let lastError = '';
+          for (let attempt=1; attempt<=30; attempt++) {
+            try {
+              result = await verifyOnce();
+              console.log('Live verification attempt '+attempt+' passed');
+              break;
+            } catch (error) {
+              lastError = String(error);
+              console.log('Live verification attempt '+attempt+' waiting: '+lastError);
+              if (attempt < 30) await wait(10000);
+            }
           }
+          if (!result) throw new Error('Live site did not converge after retries: ' + lastError);
           const summary = [
             '## GitHub Pages verification passed',
             '',
-            '- Homepage: HTTP ' + home.status,
-            '- latest.json: HTTP ' + latestResponse.status + ', date ' + latest.date + ', ' + latest.policies.length + ' policies',
-            '- Daily archive: HTTP ' + archiveResponse.status + ', exact match with latest.json',
-            '- history.json: HTTP ' + historyResponse.status + ', five dates in descending order',
+            '- Homepage: HTTP ' + result.home.status,
+            '- latest.json: HTTP ' + result.latestResponse.status + ', date ' + result.latest.date + ', ' + result.latest.policies.length + ' policies',
+            '- Daily archive: HTTP ' + result.archiveResponse.status + ', exact match with latest.json',
+            '- history.json: HTTP ' + result.historyResponse.status + ', five dates in descending order',
             '- Recent archives:',
-            ...checked.map(x => '  - ' + x.date + ': HTTP ' + x.status + ', ' + x.policies + ' policies')
-          ].join('\n');
-          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary + '\n');
+            ...result.checked.map(x => '  - ' + x.date + ': HTTP ' + x.status + ', ' + x.policies + ' policies')
+          ].join('\\n');
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary + '\\n');
           console.log(summary);
           NODE
